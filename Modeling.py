@@ -1015,6 +1015,12 @@ class FirstOlder_NPML(FirstOlderForward):
     def o2x_cal_h_par(self, h_par, u_z):
         u_z = u_z * self._c44
         return (u_z + (1 / self._dt - 0.5 * self._pml_z) * h_par) / (1 / self._dt + 0.5 * self._pml_z)
+    
+    def DrawRecord(self, amp = 1.0):
+        surface_record_no_bc = self._vx[:,self._pml_len,:]
+        plt.imshow(self.RangeInOne(surface_record_no_bc).T * amp, cmap = 'gray', vmin = -1, vmax = 1, interpolation='bilinear', aspect='auto')
+        plt.title("Record")
+        plt.show()
 
 
 # In[3]:
