@@ -765,14 +765,14 @@ class FirstOlderForward:
     def DrawXWaveField(self, iterations_to_show):
         fgr, axs = plt.subplots(1,len(iterations_to_show), figsize = (18,10))
         for j, ax in enumerate(axs):
-            ax.imshow(self.RangeInOne(self._vx[:, :, iterations_to_show[j]].T),                       cmap = plt.cm.coolwarm, vmin = -1, vmax = 1, interpolation='bilinear')
+            ax.imshow(self.RangeInOne(self._vx[:, :, iterations_to_show[j]].T),                       cmap = plt.cm.coolwarm, vmin = -1, vmax = 1, interpolation='bilinear', aspect='auto')
             ax.annotate("t = {0} ms".format(iterations_to_show[j] * self._dt), xy=(0.05, 0.05), xycoords="axes fraction")
         plt.show()
         
     def DrawZWaveField(self, iterations_to_show):
         fgr, axs = plt.subplots(1,len(iterations_to_show), figsize = (18,10))
         for j, ax in enumerate(axs):
-            ax.imshow(self.RangeInOne(self._vz[:, :, iterations_to_show[j]].T),                       cmap = plt.cm.coolwarm, vmin = -1, vmax = 1, interpolation='bilinear')
+            ax.imshow(self.RangeInOne(self._vz[:, :, iterations_to_show[j]].T),                       cmap = plt.cm.coolwarm, vmin = -1, vmax = 1, interpolation='bilinear', aspect='auto')
             ax.annotate("t = {0} ms".format(iterations_to_show[j]), xy=(0.05, 0.05), xycoords="axes fraction")
         plt.show()
         
@@ -786,7 +786,7 @@ class FirstOlderForward:
 # In[5]:
 
 
-class FirstOlder_NPML(FirstOlderForward):
+class FirstOlder_SPML(FirstOlderForward):
     
     def __init__(self, pmodel, vpmodel, vsmodel, tmax, xmax, zmax, nt, nx, nz, pml_len):
         
@@ -1808,6 +1808,192 @@ class FristOlderForward_PML(FirstOlderForward):
 
 # In[ ]:
 
+class FirstOlder_NPML(FirstOlderForward):
+    
+    def __init__(self, pmodel, vpmodel, vsmodel, tmax, xmax, zmax, nt, nx, nz, pml_len,\
+                 sigma_x_max = 1200, sigma_z_max = 1200, kai_x_max = 2, kai_z_max = 2, alpha_x_max = 150 ,alpha_z_max = 150):
+        
+        dt = tmax / nt
+        super().__init__(pmodel, vpmodel, vsmodel, tmax, xmax, zmax, nt, nx, nz)
+        self._pml_len = pml_len
+        
+        xspacing = np.linspace(0,nx,nx)
+        zspacing = np.linspace(0,nz,nz)
+        zmesh, xmesh = np.meshgrid(zspacing, xspacing)
+        
+#         sigma_x_max = 1200
+#         sigma_z_max = 1200
+#         kai_x_max = 2
+#         kai_z_max = 2
+#         alpha_x_max = 150
+#         alpha_z_max = 150
 
+        sigma_x = np.where(xmesh<pml_len, sigma_x_max * np.power((pml_len-xmesh)/pml_len,2),\
+                               np.where(nx-xmesh<pml_len, sigma_x_max * np.power((xmesh-nx+pml_len)/pml_len,2), 0))
+        
+        sigma_z = np.where(zmesh<pml_len, sigma_z_max * np.power((pml_len-zmesh)/pml_len,2),\
+                               np.where(nz-zmesh<pml_len, sigma_z_max * np.power((zmesh-nz+pml_len)/pml_len,2), 0))
+        
+        kai_x = np.where(xmesh<pml_len, (kai_x_max - 1) * np.power((pml_len-xmesh)/pml_len,2) + 1,\
+                               np.where(nx-xmesh<pml_len, (kai_x_max - 1) * np.power((xmesh-nx+pml_len)/pml_len,2) + 1, 1))
+        
+        kai_z = np.where(zmesh<pml_len, (kai_z_max - 1) * np.power((pml_len-zmesh)/pml_len,2) + 1,\
+                               np.where(nz-zmesh<pml_len, (kai_z_max - 1) * np.power((zmesh-nz+pml_len)/pml_len,2) + 1, 1))
+        
+        alpha_x = np.where(xmesh<pml_len, alpha_x_max * np.power((pml_len-xmesh)/pml_len,2),\
+                               np.where(nx-xmesh<pml_len, alpha_x_max * np.power((xmesh-nx+pml_len)/pml_len,2), 0))
+        
+        alpha_z = np.where(zmesh<pml_len, alpha_z_max * np.power((pml_len-zmesh)/pml_len,2),\
+                               np.where(nz-zmesh<pml_len, alpha_z_max * np.power((zmesh-nz+pml_len)/pml_len,2), 0))
+        
+        self._kai_x = kai_x
+        self._kai_z = kai_z
+        
+#         plt.imshow(sigma_x)
+#         plt.colorbar(shrink=0.9)
+#         plt.show()    
+        
+#         plt.imshow(kai_x)
+#         plt.colorbar(shrink=0.9)
+#         plt.show()        
+        
+#         plt.imshow(alpha_x)
+#         plt.colorbar(shrink=0.9)
+#         plt.show()
+        
+        self._b_x = np.exp(-1 * (alpha_x + sigma_x / kai_x) * dt)
+        self._a_x = np.where(sigma_x==0, 0, (1 - self._b_x) * sigma_x / (kai_x * (kai_x * alpha_x + sigma_x)))
+        # self._c_x = 1 - 1 / kai_x
+        
+        self._b_z = np.exp(-1 * (alpha_z + sigma_z / kai_z) * dt)
+        self._a_z = np.where(sigma_z==0, 0, (1 - self._b_z) * sigma_z / (kai_z * (kai_z * alpha_z + sigma_z)))
+        # self._c_z = 1 - 1 / kai_z
+        
+    def o2xFM(self, wavelet, wavalet_position, wavalet_direction='z'):
+        
+        t_array = np.arange(0, self._tmax, self._dt)
+        nx = self._nx
+        nz = self._nz
+        
+        # set auxiliary parameters
+        u = np.zeros((nx,nz), dtype=float)
+        v = np.zeros((nx,nz), dtype=float)
+        r = np.zeros((nx,nz), dtype=float)
+        t = np.zeros((nx,nz), dtype=float)
+        h = np.zeros((nx,nz), dtype=float)
+        
+        omega_xx = np.zeros((nx,nz), dtype=float)
+        omega_xz = np.zeros((nx,nz), dtype=float)
+        omega_zx = np.zeros((nx,nz), dtype=float)
+        omega_zz = np.zeros((nx,nz), dtype=float)
+        phi_xx = np.zeros((nx,nz), dtype=float)
+        phi_zz = np.zeros((nx,nz), dtype=float)
+        phi_zx = np.zeros((nx,nz), dtype=float)
+        phi_xz = np.zeros((nx,nz), dtype=float)
 
+        for tk, tt in enumerate(t_array):
+            if tk >= 1:  # the first step needs not to compute
 
+                u_x = self.o2x_cal_u_x(u)
+                u_z = self.o2x_cal_u_z(u)
+                v_x = self.o2x_cal_v_x(v)
+                v_z = self.o2x_cal_v_z(v)
+                
+                r = self.o2x_cal_r(r, u_x, v_z, phi_xx, phi_zz)
+                t = self.o2x_cal_t(t, u_x, v_z, phi_xx, phi_zz) 
+                h = self.o2x_cal_h(h, v_x, u_z, phi_zx, phi_xz)
+                
+                r_x = self.o2x_cal_r_x(r)
+                t_z = self.o2x_cal_t_z(t)
+                h_x = self.o2x_cal_h_x(h)
+                h_z = self.o2x_cal_h_z(h)
+                
+                # omega_update
+                omega_xx = self.o2x_cal_omega_xx(r_x, omega_xx)
+                omega_xz = self.o2x_cal_omega_xz(h_z, omega_xz)
+                omega_zx = self.o2x_cal_omega_zx(h_x, omega_zx)
+                omega_zz = self.o2x_cal_omega_zz(t_z, omega_zz)
+                
+                u = self.o2x_cal_u(u, r_x, h_z, omega_xx, omega_xz)
+                v = self.o2x_cal_v(v, h_x, t_z, omega_zx, omega_zz)
+                
+                # phi_update
+                phi_xx = self.o2x_cal_phi_xx(u_x, phi_xx)
+                phi_zz = self.o2x_cal_phi_zz(v_z, phi_zz)
+                phi_zx = self.o2x_cal_phi_zx(v_x, phi_zx)
+                phi_xz = self.o2x_cal_phi_xz(u_z, phi_xz)
+                
+                if tk < len(wavelet):  # source is active
+                    if wavalet_direction=='x':
+                        u[wavalet_position[1], wavalet_position[0]] += wavelet[tk]
+                    else:
+                        v[wavalet_position[1], wavalet_position[0]] += wavelet[tk]
+                
+            self._vx[:,:,tk] = u
+            self._vz[:,:,tk] = v
+            
+    def o2x_cal_u(self, u, r_x, h_z, omega_xx, omega_xz):
+        right = 1 / self._kai_x * r_x - omega_xx + 1 / self._kai_z * h_z - omega_xz
+        return right * self._dt / self._pmodel + u
+    
+    def o2x_cal_v(self, v, h_x, t_z, omega_zx, omega_zz):
+        right = 1 / self._kai_x * h_x - omega_zx + 1 / self._kai_z * t_z - omega_zz
+        return right * self._dt / self._pmodel + v
+            
+    def o2x_cal_r(self, r, u_x, v_z, phi_xx, phi_zz):
+        right = self._c11 * (1 / self._kai_x * u_x - phi_xx) + self._c13 * (1 / self._kai_z * v_z - phi_zz)
+        return right * self._dt + r
+
+    def o2x_cal_t(self, t, u_x, v_z, phi_xx, phi_zz):
+        right = self._c13 * (1 / self._kai_x * u_x - phi_xx) + self._c11 * (1 / self._kai_z * v_z - phi_zz)
+        return right * self._dt + t
+    
+    def o2x_cal_h(self, h, v_x, u_z, phi_zx, phi_xz):
+        right = self._c44 * (1 / self._kai_x * v_x - phi_zx + 1 / self._kai_z * u_z - phi_xz)
+        return right * self._dt + h
+    
+    def o2x_cal_omega_xx(self, r_x, omega_xx):
+        b_x = self._b_x
+        a_x = self._a_x
+        return b_x * omega_xx + a_x * r_x
+    
+    def o2x_cal_omega_xz(self, h_z, omega_xz):
+        b_z = self._b_z
+        a_z = self._a_z
+        return b_z * omega_xz + a_z * h_z
+    
+    def o2x_cal_omega_zx(self, h_x, omega_zx):
+        b_x = self._b_x
+        a_x = self._a_x
+        return b_x * omega_zx + a_x * h_x
+    
+    def o2x_cal_omega_zz(self, t_z, omega_zz):
+        b_z = self._b_z
+        a_z = self._a_z
+        return b_z * omega_zz + a_z * t_z
+    
+    def o2x_cal_phi_xx(self, u_x, phi_xx):
+        b_x = self._b_x
+        a_x = self._a_x
+        return b_x * phi_xx + a_x * u_x
+    
+    def o2x_cal_phi_zz(self, v_z, phi_zz):
+        b_z = self._b_z
+        a_z = self._a_z
+        return b_z * phi_zz + a_z * v_z
+        
+    def o2x_cal_phi_zx(self, v_x, phi_zx):
+        b_x = self._b_x
+        a_x = self._a_x
+        return b_x * phi_zx + a_x * v_x
+        
+    def o2x_cal_phi_xz(self, u_z, phi_xz):
+        b_z = self._b_z
+        a_z = self._a_z
+        return b_z * phi_xz + a_z * u_z
+    
+    def DrawRecord(self, amp = 1.0):
+        surface_record_no_bc = self._vx[:,self._pml_len,:]
+        plt.imshow(self.RangeInOne(surface_record_no_bc).T * amp, cmap = 'gray', vmin = -1, vmax = 1, interpolation='bilinear', aspect='auto')
+        plt.title("Record")
+        plt.show()
